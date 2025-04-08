@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesmerizing Particle Simulation (Wrap Around)</title>
+    <style>
+        /* Basic styling for the page */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden; /* Hide scrollbars */
+            background-color: #0a0a1a; /* Dark background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif; /* Using Inter font */
+            color: #eee;
+        }
+
+        /* Style the canvas */
+        canvas {
+            display: block;
+            background-color: #0a0a1a; /* Match body background */
+            /* Make canvas responsive, but maintain aspect ratio if needed */
+            /* For full screen, width/height are set in JS */
+        }
+
+        /* Simple message box styling */
+        .message-box {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+            pointer-events: none; /* Don't block mouse events */
+        }
+
+        .message-box.visible {
+            opacity: 1;
+        }
+
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <canvas id="particleCanvas"></canvas>
+    <div id="messageBox" class="message-box">Move your mouse!</div>
+
+    <script>
+        // Get the canvas element and its 2D rendering context
+        const canvas = document.getElementById('particleCanvas');
+        const ctx = canvas.getContext('2d');
+        const messageBox = document.getElementById('messageBox');
+
+        // --- Configuration ---
+        const PARTICLE_COUNT = 1000; // Number of particles
+        const MAX_CONNECTION_DISTANCE = 100; // Max distance to draw a line between particles
+        const MOUSE_INTERACTION_RADIUS = 150; // Radius around the mouse to affect particles
+        const BASE_SPEED = 0.5; // Base speed of particles
+        const MOUSE_REPEL_STRENGTH = 2; // How strongly particles are pushed by the mouse
+        const HUE_SHIFT_SPEED = 0.1; // Speed at which the base color hue changes
+
+        let particles = []; // Array to store particle objects
+        let animationFrameId; // To store the requestAnimationFrame ID
+        let currentHue = 0; // Starting hue for colors
+
+        // Mouse position object
+        const mouse = {
+            x: null,
+            y: null,
+            radius: MOUSE_INTERACTION_RADIUS
+        };
+
+        // --- Utility Functions ---
+
+        // Function to show a message briefly
+        function showMessage(text, duration = 2000) {
+            messageBox.textContent = text;
+            messageBox.classList.add('visible');
+            setTimeout(() => {
+                messageBox.classList.remove('visible');
+            }, duration);
+        }
+
+        // Function to get a random number within a range
+        function getRandom(min, max) {
+            return Math.random() * (max - min) + min;
+        }
+
+        // --- Particle Class ---
+        class Particle {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                // Random initial velocity
+                this.vx = getRandom(-BASE_SPEED, BASE_SPEED) || 0.1; // Ensure non-zero velocity
+                this.vy = getRandom(-BASE_SPEED, BASE_SPEED) || 0.1;
+                this.size = getRandom(1, 3); // Random size
+                this.baseX = this.x; // Store original position (not used currently, but useful)
+                this.baseY = this.y;
+                this.density = (Math.random() * 30) + 1; // Affects interaction strength (not used currently)
+            }
+
+            // Method to draw the particle
+            draw(hue) {
+                ctx.fillStyle = `hsl(${hue}, 100%, 70%)`; // Use HSL for smooth color shifts
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Method to update the particle's position and handle interactions
+            update() {
+                // --- MODIFIED SECTION: Screen Wrap ---
+                // If particle goes off the right edge, wrap to the left edge
+                if (this.x - this.size > canvas.width) {
+                    this.x = -this.size; // Start just off the left edge
+                }
+                // If particle goes off the left edge, wrap to the right edge
+                else if (this.x + this.size < 0) {
+                    this.x = canvas.width + this.size; // Start just off the right edge
+                }
+
+                // If particle goes off the bottom edge, wrap to the top edge
+                if (this.y - this.size > canvas.height) {
+                    this.y = -this.size; // Start just off the top edge
+                }
+                // If particle goes off the top edge, wrap to the bottom edge
+                else if (this.y + this.size < 0) {
+                    this.y = canvas.height + this.size; // Start just off the bottom edge
+                }
+                // --- END OF MODIFIED SECTION ---
+
+
+                // Mouse interaction - repel particles
+                if (mouse.x !== null && mouse.y !== null) {
+                    const dx = mouse.x - this.x;
+                    const dy = mouse.y - this.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < mouse.radius) {
+                        const forceDirectionX = dx / distance;
+                        const forceDirectionY = dy / distance;
+                        // Calculate force based on distance (stronger closer)
+                        const force = (mouse.radius - distance) / mouse.radius;
+                        const directionX = forceDirectionX * force * MOUSE_REPEL_STRENGTH;
+                        const directionY = forceDirectionY * force * MOUSE_REPEL_STRENGTH;
+                        // Apply repel force (move away from mouse)
+                        this.x -= directionX;
+                        this.y -= directionY;
+                        // Add some velocity change based on repel
+                        this.vx -= directionX * 0.1;
+                        this.vy -= directionY * 0.1;
+                    }
+                }
+
+                // Update position based on velocity
+                this.x += this.vx;
+                this.y += this.vy;
+
+                 // Dampen velocity slightly over time to prevent runaway speeds
+                 this.vx *= 0.99;
+                 this.vy *= 0.99;
+
+                 // Ensure minimum speed
+                 const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+                 if (speed < BASE_SPEED * 0.1) {
+                     this.vx = (this.vx / speed || getRandom(-1, 1)) * BASE_SPEED * 0.1;
+                     this.vy = (this.vy / speed || getRandom(-1, 1)) * BASE_SPEED * 0.1;
+                 } else if (speed > BASE_SPEED * 3) { // Speed limit
+                    this.vx = (this.vx / speed) * BASE_SPEED * 3;
+                    this.vy = (this.vy / speed) * BASE_SPEED * 3;
+                 }
+            }
+        }
+
+        // --- Initialization ---
+        function init() {
+            // Set canvas size to fill the window
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            particles = []; // Clear existing particles
+            // Create particles with random positions
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const x = Math.random() * canvas.width;
+                const y = Math.random() * canvas.height;
+                particles.push(new Particle(x, y));
+            }
+
+            // Reset mouse position on init/resize
+            mouse.x = null;
+            mouse.y = null;
+
+            // Show initial message
+            showMessage("Move your mouse!");
+        }
+
+        // --- Connections ---
+        function connectParticles() {
+            let opacityValue = 1;
+            for (let a = 0; a < particles.length; a++) {
+                for (let b = a + 1; b < particles.length; b++) { // Start b from a+1 to avoid duplicates and self-connection
+                    const dx = particles[a].x - particles[b].x;
+                    const dy = particles[a].y - particles[b].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < MAX_CONNECTION_DISTANCE) {
+                        // Calculate opacity based on distance (fade out further away)
+                        opacityValue = 1 - (distance / MAX_CONNECTION_DISTANCE);
+                        // Use the current cycling hue for the lines
+                        ctx.strokeStyle = `hsla(${currentHue}, 100%, 70%, ${opacityValue})`;
+                        ctx.lineWidth = 0.5; // Thin lines
+                        ctx.beginPath();
+                        ctx.moveTo(particles[a].x, particles[a].y);
+                        ctx.lineTo(particles[b].x, particles[b].y);
+                        ctx.stroke();
+                        ctx.closePath();
+                    }
+                }
+            }
+        }
+
+        // --- Animation Loop ---
+        function animate() {
+            // Clear the canvas before drawing the next frame
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Update the base hue for color cycling
+            currentHue = (currentHue + HUE_SHIFT_SPEED) % 360;
+
+            // Update and draw each particle
+            particles.forEach(particle => {
+                particle.update();
+                particle.draw(currentHue); // Pass the current hue
+            });
+
+            // Draw connections between nearby particles
+            connectParticles();
+
+            // Request the next frame
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        // --- Event Listeners ---
+
+        // Update mouse coordinates on mouse move
+        window.addEventListener('mousemove', (event) => {
+            mouse.x = event.clientX;
+            mouse.y = event.clientY;
+        });
+
+        // Remove mouse coordinates when the mouse leaves the window
+        window.addEventListener('mouseout', () => {
+            mouse.x = null;
+            mouse.y = null;
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            // Cancel the current animation frame to prevent issues during resize
+            cancelAnimationFrame(animationFrameId);
+            // Re-initialize the simulation with the new window size
+            init();
+            // Restart the animation loop
+            animate();
+        });
+
+        // --- Start Simulation ---
+        // Ensure the DOM is fully loaded before initializing
+        window.onload = () => {
+            try {
+                init(); // Initialize particle positions and canvas size
+                animate(); // Start the animation loop
+            } catch (error) {
+                console.error("Failed to initialize canvas simulation:", error);
+                showMessage("Error initializing simulation.", 5000);
+            }
+        };
+
+    </script>
+</body>
+</html>
